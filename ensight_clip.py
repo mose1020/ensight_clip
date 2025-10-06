@@ -8,6 +8,7 @@ import vtk
 import numpy as np
 import os
 import sys
+import shutil
 from pathlib import Path
 
 
@@ -19,9 +20,10 @@ class EnSightClipper:
         Initialize the EnSight clipper
 
         Args:
-            case_file: Path to the EnSight .case file
+            case_file: Path to the EnSight .case or .encas file
         """
         self.case_file = case_file
+        self.case_path = Path(case_file)
         self.reader = None
         self.clipped_data = None
 
@@ -206,7 +208,7 @@ class EnSightClipper:
 
         print(f"Writing clipped EnSight data to: {output_dir}")
 
-        # Create EnSight writer
+        # Create EnSight writer - VTK creates files with .0. prefix
         writer = vtk.vtkEnSightWriter()
         writer.SetInputData(self.clipped_data)
         writer.SetFileName(str(output_path / f"{base_name}.case"))
@@ -214,8 +216,53 @@ class EnSightClipper:
         writer.SetBaseName(base_name)
         writer.Write()
 
+        # VTK actually creates {base_name}.0.case - rename to .encas
+        temp_case = output_path / f"{base_name}.0.case"
+        encas_file = output_path / f"{base_name}.encas"
+        if temp_case.exists():
+            temp_case.replace(encas_file)
+            print(f"Renamed {base_name}.0.case to {base_name}.encas")
+
+        # Copy or create XML metadata file
+        xml_source = self.case_path.parent / f"{self.case_path.stem}.xml"
+        xml_dest = output_path / f"{base_name}.xml"
+
+        if xml_source.exists():
+            shutil.copy2(xml_source, xml_dest)
+            print(f"Copied XML metadata file: {xml_dest.name}")
+        else:
+            # Create basic XML metadata
+            self._create_basic_xml(xml_dest, base_name)
+            print(f"Created basic XML metadata file: {xml_dest.name}")
+
         print(f"Successfully wrote clipped EnSight files")
-        print(f"Case file: {output_path / f'{base_name}.case'}")
+        print(f"Case file: {encas_file}")
+        print(f"XML file:  {xml_dest}")
+
+    def _create_basic_xml(self, xml_path, base_name):
+        """Create a basic XML metadata file"""
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<CEImetadata version="1.0">
+  <vars>
+    <metatags>
+      <tag name="ENS_UNITS_LABEL" type="str"></tag>
+      <tag name="ENS_UNITS_DIMS" type="str"></tag>
+    </metatags>
+    <varlist>
+    </varlist>
+  </vars>
+  <case>
+    <metatags>
+        <tag name="ENS_UNITS_LABEL" type="flt">2.0</tag>
+        <tag name="ENS_UNITS_DIMS" type="flt">1.0</tag>
+        <tag name="ENS_UNITS_SYSTEM" type="flt">1.0</tag>
+        <tag name="ENS_UNITS_SYSTEM_NAME" type="str">SI</tag>
+    </metatags>
+  </case>
+</CEImetadata>
+"""
+        with open(xml_path, 'w') as f:
+            f.write(xml_content)
 
     def get_bounds(self):
         """Get bounds of the original dataset"""
