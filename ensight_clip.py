@@ -61,24 +61,23 @@ class EnSightClipper:
         plane.SetOrigin(origin)
         plane.SetNormal(normal)
 
-        # Get the output and handle multiblock
+        # Get the output and handle multiblock - preserve volume cells
         output = self.reader.GetOutput()
 
-        # For multiblock datasets, use vtkMultiBlockDataGroupFilter
+        # For multiblock datasets, append blocks to preserve volume
         if hasattr(output, 'GetNumberOfBlocks') and output.GetNumberOfBlocks() > 0:
-            # Merge multiblock into single dataset
-            merger = vtk.vtkMultiBlockDataGroupFilter()
-            merger.SetInputConnection(self.reader.GetOutputPort())
-            merger.Update()
-
-            # Extract merged geometry
-            extract = vtk.vtkCompositeDataGeometryFilter()
-            extract.SetInputConnection(merger.GetOutputPort())
-            extract.Update()
+            # Append all blocks together
+            append = vtk.vtkAppendFilter()
+            for block_idx in range(output.GetNumberOfBlocks()):
+                block = output.GetBlock(block_idx)
+                if block and block.GetNumberOfCells() > 0:
+                    append.AddInputData(block)
+            append.Update()
+            merged_data = append.GetOutput()
 
             # Create clipper
             clipper = vtk.vtkClipDataSet()
-            clipper.SetInputConnection(extract.GetOutputPort())
+            clipper.SetInputData(merged_data)
             clipper.SetClipFunction(plane)
             clipper.SetInsideOut(invert)
             clipper.Update()
@@ -108,24 +107,23 @@ class EnSightClipper:
         box = vtk.vtkBox()
         box.SetBounds(bounds)
 
-        # Get the output and handle multiblock
+        # Get the output and handle multiblock - preserve volume cells
         output = self.reader.GetOutput()
 
-        # For multiblock datasets, merge first
+        # For multiblock datasets, append blocks to preserve volume
         if hasattr(output, 'GetNumberOfBlocks') and output.GetNumberOfBlocks() > 0:
-            # Merge multiblock into single dataset
-            merger = vtk.vtkMultiBlockDataGroupFilter()
-            merger.SetInputConnection(self.reader.GetOutputPort())
-            merger.Update()
-
-            # Extract merged geometry
-            extract = vtk.vtkCompositeDataGeometryFilter()
-            extract.SetInputConnection(merger.GetOutputPort())
-            extract.Update()
+            # Append all blocks together
+            append = vtk.vtkAppendFilter()
+            for block_idx in range(output.GetNumberOfBlocks()):
+                block = output.GetBlock(block_idx)
+                if block and block.GetNumberOfCells() > 0:
+                    append.AddInputData(block)
+            append.Update()
+            merged_data = append.GetOutput()
 
             # Create clipper
             clipper = vtk.vtkClipDataSet()
-            clipper.SetInputConnection(extract.GetOutputPort())
+            clipper.SetInputData(merged_data)
             clipper.SetClipFunction(box)
             clipper.SetInsideOut(True)  # Keep inside the box
             clipper.Update()
@@ -157,24 +155,23 @@ class EnSightClipper:
         sphere.SetCenter(center)
         sphere.SetRadius(radius)
 
-        # Get the output and handle multiblock
+        # Get the output and handle multiblock - preserve volume cells
         output = self.reader.GetOutput()
 
-        # For multiblock datasets, merge first
+        # For multiblock datasets, append blocks to preserve volume
         if hasattr(output, 'GetNumberOfBlocks') and output.GetNumberOfBlocks() > 0:
-            # Merge multiblock into single dataset
-            merger = vtk.vtkMultiBlockDataGroupFilter()
-            merger.SetInputConnection(self.reader.GetOutputPort())
-            merger.Update()
-
-            # Extract merged geometry
-            extract = vtk.vtkCompositeDataGeometryFilter()
-            extract.SetInputConnection(merger.GetOutputPort())
-            extract.Update()
+            # Append all blocks together
+            append = vtk.vtkAppendFilter()
+            for block_idx in range(output.GetNumberOfBlocks()):
+                block = output.GetBlock(block_idx)
+                if block and block.GetNumberOfCells() > 0:
+                    append.AddInputData(block)
+            append.Update()
+            merged_data = append.GetOutput()
 
             # Create clipper
             clipper = vtk.vtkClipDataSet()
-            clipper.SetInputConnection(extract.GetOutputPort())
+            clipper.SetInputData(merged_data)
             clipper.SetClipFunction(sphere)
             clipper.SetInsideOut(True)  # Keep inside the sphere
             clipper.Update()
@@ -202,15 +199,26 @@ class EnSightClipper:
         if self.clipped_data is None:
             raise ValueError("No clipped data available. Run a clip operation first.")
 
-        # Create output directory if it doesn't exist
-        output_path = Path(output_dir)
+        # Create subdirectory with base_name
+        output_path = Path(output_dir) / base_name
         output_path.mkdir(parents=True, exist_ok=True)
 
-        print(f"Writing clipped EnSight data to: {output_dir}")
+        print(f"Writing clipped EnSight data to: {output_path}")
+
+        # Convert to tetrahedra to avoid mixed cell type issues
+        print(f"Converting to tetrahedra for EnSight compatibility...")
+        tetra_filter = vtk.vtkDataSetTriangleFilter()
+        tetra_filter.SetInputData(self.clipped_data)
+        tetra_filter.Update()
+
+        tetra_data = tetra_filter.GetOutput()
+        n_cells = tetra_data.GetNumberOfCells()
+        n_points = tetra_data.GetNumberOfPoints()
+        print(f"After tetrahedralization: {n_points} points, {n_cells} cells")
 
         # Create EnSight writer - VTK creates files with .0. prefix
         writer = vtk.vtkEnSightWriter()
-        writer.SetInputData(self.clipped_data)
+        writer.SetInputData(tetra_data)
         writer.SetFileName(str(output_path / f"{base_name}.case"))
         writer.SetPath(str(output_path))
         writer.SetBaseName(base_name)
@@ -231,17 +239,53 @@ class EnSightClipper:
             shutil.copy2(xml_source, xml_dest)
             print(f"Copied XML metadata file: {xml_dest.name}")
         else:
-            # Create basic XML metadata
-            self._create_basic_xml(xml_dest, base_name)
-            print(f"Created basic XML metadata file: {xml_dest.name}")
+            # Create XML metadata from clipped data
+            self._create_xml_from_data(xml_dest, self.clipped_data)
+            print(f"Created XML metadata file: {xml_dest.name}")
 
         print(f"Successfully wrote clipped EnSight files")
         print(f"Case file: {encas_file}")
         print(f"XML file:  {xml_dest}")
 
-    def _create_basic_xml(self, xml_path, base_name):
-        """Create a basic XML metadata file"""
-        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+    def _create_xml_from_data(self, xml_path, data):
+        """Create XML metadata file from clipped data"""
+        # Get all point data arrays
+        point_data = data.GetPointData()
+
+        varlist = []
+        for i in range(point_data.GetNumberOfArrays()):
+            array_name = point_data.GetArrayName(i)
+
+            # Determine units based on variable name (common CFD variables)
+            if 'pressure' in array_name.lower():
+                units_label = "Pa"
+                units_dims = "M/LTT"
+            elif 'velocity' in array_name.lower():
+                units_label = "m s^-1"
+                units_dims = "L/T"
+            elif 'turb_kinetic_energy' in array_name.lower():
+                units_label = "m^2 s^-2"
+                units_dims = "LL/TT"
+            elif 'turb_diss' in array_name.lower():
+                units_label = "m^2 s^-3"
+                units_dims = "LL/TTT"
+            elif 'temperature' in array_name.lower():
+                units_label = "K"
+                units_dims = "Θ"
+            elif 'density' in array_name.lower():
+                units_label = "kg m^-3"
+                units_dims = "M/LLL"
+            else:
+                units_label = ""
+                units_dims = ""
+
+            varlist.append(f'      <var name ="{array_name}" ENS_UNITS_LABEL="{units_label}" ENS_UNITS_DIMS="{units_dims}"></var>')
+
+        # Add standard variables
+        varlist.append('      <var name ="Coordinates" ENS_UNITS_LABEL="m" ENS_UNITS_DIMS="L"></var>')
+        varlist.append('      <var name ="Time" ENS_UNITS_LABEL="s" ENS_UNITS_DIMS="T"></var>')
+
+        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <CEImetadata version="1.0">
   <vars>
     <metatags>
@@ -249,6 +293,7 @@ class EnSightClipper:
       <tag name="ENS_UNITS_DIMS" type="str"></tag>
     </metatags>
     <varlist>
+{chr(10).join(varlist)}
     </varlist>
   </vars>
   <case>
@@ -261,6 +306,7 @@ class EnSightClipper:
   </case>
 </CEImetadata>
 """
+
         with open(xml_path, 'w') as f:
             f.write(xml_content)
 

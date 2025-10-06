@@ -42,6 +42,11 @@ MANIFEST
 output/
 *.vec*
 
+# Test files
+test_*.py
+comprehensive_test.py
+TEST_RESULTS.md
+
 # OS
 .DS_Store
 Thumbs.db
