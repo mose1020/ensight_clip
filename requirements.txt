@@ -2,3 +2,4 @@ numpy>=1.21.0
 vtk>=9.2.0
 PyQt5>=5.15.0
 pyinstaller>=5.0.0
+psutil>=5.9.0
