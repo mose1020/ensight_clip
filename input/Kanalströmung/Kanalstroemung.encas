@@ -1,11 +1,9 @@
 FORMAT
 type:  ensight gold
 GEOMETRY
-model: "Kanalstroemung.geo"
+model: Kanalstroemung.geo
 VARIABLE
-scalar per node: pressure                                         "Kanalstroemung.scl1"
-scalar per node: turb_kinetic_energy                              "Kanalstroemung.scl2"
-scalar per node: turb_diss_rate                                   "Kanalstroemung.scl3"
-vector per node: velocity                                         "Kanalstroemung.vel"
-SCRIPTS
-metadata: "Kanalstroemung.xml"
+scalar per node: pressure                                         Kanalstroemung.scl1
+scalar per node: turb_kinetic_energy                              Kanalstroemung.scl2
+scalar per node: turb_diss_rate                                   Kanalstroemung.scl3
+vector per node: velocity                                         Kanalstroemung.vel

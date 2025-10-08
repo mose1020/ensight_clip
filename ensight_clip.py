@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import signal
 import traceback
 import logging
+import tempfile
 
 
 def setup_logging(log_file="ensight_clip.log"):
@@ -54,8 +55,8 @@ class ProgressCallback:
         progress = caller.GetProgress() * 100
         current_time = time.time()
 
-        if (progress - self.last_progress > 1 or
-            current_time - self.last_update_time > 0.5 or
+        if (progress - self.last_progress > 2 or
+            current_time - self.last_update_time > 1.0 or
             progress >= 100):
 
             elapsed = current_time - self.start_time
@@ -314,127 +315,196 @@ class EnSightClipper:
 
     def _clip_blocks_individually(self, output, bounds):
         """
-        Clippt jeden Block einzeln - extrem speicherschonend
+        Clippt jeden Block einzeln - STREAMING zu temporären Dateien
+        Verhindert OOM durch direktes Schreiben statt alles im RAM zu halten
         """
         if self.verbose:
-            print("\n🔪 Clippe Blöcke einzeln...")
+            print("\n🔪 Clippe Blöcke einzeln (Streaming-Modus)...")
 
         box = vtk.vtkBox()
         box.SetBounds(bounds)
 
-        append = vtk.vtkAppendFilter()
         n_blocks = output.GetNumberOfBlocks()
         blocks_clipped = 0
         blocks_skipped = 0
         start_time = time.time()
 
-        for block_idx in range(n_blocks):
-            block = output.GetBlock(block_idx)
-            if block is None or block.GetNumberOfCells() == 0:
-                continue
+        # Temporäres Verzeichnis für Block-Dateien
+        temp_dir = tempfile.mkdtemp(prefix="ensight_clip_")
+        temp_files = []
 
-            n_cells = block.GetNumberOfCells()
+        try:
+            # Phase 1: Clippe jeden Block und schreibe in temporäre Datei
+            for block_idx in range(n_blocks):
+                block = output.GetBlock(block_idx)
+                if block is None or block.GetNumberOfCells() == 0:
+                    continue
 
-            # SCHNELLER PRE-CHECK: Liegt Block komplett außerhalb der Box?
-            block_bounds = block.GetBounds()
-            if not self._bounds_intersect(block_bounds, bounds):
+                n_cells = block.GetNumberOfCells()
+
+                # SCHNELLER PRE-CHECK: Liegt Block komplett außerhalb der Box?
+                block_bounds = block.GetBounds()
+                if not self._bounds_intersect(block_bounds, bounds):
+                    if self.verbose:
+                        print(f"\n  📦 Block {block_idx+1}/{n_blocks}: {n_cells:,} Zellen")
+                        print(f"     ⊘ Komplett außerhalb Box (übersprungen)")
+                    blocks_skipped += 1
+                    continue
+
                 if self.verbose:
                     print(f"\n  📦 Block {block_idx+1}/{n_blocks}: {n_cells:,} Zellen")
-                    print(f"     ⊘ Komplett außerhalb Box (übersprungen)")
-                blocks_skipped += 1
-                continue
+                    mem = psutil.Process().memory_info().rss / 1024 / 1024
+                    print(f"     💾 Speicher: {mem:.0f} MB")
 
-            if self.verbose:
-                print(f"\n  📦 Block {block_idx+1}/{n_blocks}: {n_cells:,} Zellen")
-                mem = psutil.Process().memory_info().rss / 1024 / 1024
-                print(f"     💾 Speicher: {mem:.0f} MB")
-                print(f"     🔄 Clippe Block...")
+                    # Warnung bei sehr großen Blöcken
+                    if n_cells > 15_000_000:
+                        print(f"     ⚠️  WARNUNG: Sehr großer Block ({n_cells/1e6:.1f}M Zellen)")
+                        print(f"     ⏱️  Dieser Block könnte sehr lange dauern (>30min möglich)")
 
-            # Clip Block
-            clipper = vtk.vtkTableBasedClipDataSet()
-            clipper.SetInputData(block)
-            clipper.SetClipFunction(box)
-            clipper.SetInsideOut(True)
-            clipper.SetMergeTolerance(1e-6)
-            clipper.SetGenerateClippedOutput(False)
+                    print(f"     🔄 Clippe Block...")
 
-            # Progress-Callback für diesen Block
-            progress_cb = ProgressCallback(f"Block {block_idx+1}/{n_blocks}", show_memory=True)
-            clipper.AddObserver(vtk.vtkCommand.ProgressEvent, progress_cb)
+                # Clip Block
+                clipper = vtk.vtkTableBasedClipDataSet()
+                clipper.SetInputData(block)
+                clipper.SetClipFunction(box)
+                clipper.SetInsideOut(True)
+                clipper.SetMergeTolerance(1e-6)
+                clipper.SetGenerateClippedOutput(False)
 
-            try:
-                # Speicherprüfung vor jedem Block
-                mem = psutil.virtual_memory()
-                if mem.available < 1024 * 1024 * 1024:  # < 1GB
-                    print(f"\n     ⚠️  Kritischer Speichermangel! Nur {mem.available/1024/1024:.0f} MB frei")
-                    print(f"     Erzwinge Garbage Collection...")
-                    gc.collect()
-                    mem = psutil.virtual_memory()
-                    if mem.available < 512 * 1024 * 1024:  # < 512MB
-                        print(f"     ❌ Immer noch zu wenig Speicher. Breche ab.")
-                        break
+                # Progress-Callback für alle Blöcke
+                progress_cb = ProgressCallback(f"Block {block_idx+1}/{n_blocks}", show_memory=True)
+                clipper.AddObserver(vtk.vtkCommand.ProgressEvent, progress_cb)
 
-                block_start = time.time()
-                clipper.Update()
-                block_elapsed = time.time() - block_start
-                clipped = clipper.GetOutput()
-
-                if clipped.GetNumberOfCells() > 0:
-                    append.AddInputData(clipped)
-                    blocks_clipped += 1
-                    if self.verbose:
-                        print(f"     ✓ {clipped.GetNumberOfCells():,} Zellen behalten ({block_elapsed:.1f}s)")
-                else:
-                    if self.verbose:
-                        print(f"     ⊘ Block außerhalb Box ({block_elapsed:.1f}s)")
-
-            except MemoryError as e:
-                if self.verbose:
-                    print(f"     ❌ Speicherfehler: {e}")
-                    print(f"     Überspringe Block {block_idx+1}")
-                continue
-
-            except Exception as e:
-                if self.verbose:
-                    print(f"     ⚠️  Fehler: {type(e).__name__}: {e}")
-                continue
-
-            finally:
-                # Speicher freigeben
                 try:
+                    # Speicherprüfung vor jedem Block
+                    mem = psutil.virtual_memory()
+                    if mem.available < 2 * 1024 * 1024 * 1024:  # < 2GB
+                        print(f"\n     ⚠️  Wenig Speicher! Nur {mem.available/1024/1024/1024:.1f} GB frei")
+                        print(f"     Erzwinge Garbage Collection...")
+                        gc.collect()
+
+                    block_start = time.time()
+                    clipper.Update()
+                    block_elapsed = time.time() - block_start
+                    clipped = clipper.GetOutput()
+
+                    if clipped.GetNumberOfCells() > 0:
+                        # Schreibe geclippten Block in temporäre Datei
+                        temp_file = os.path.join(temp_dir, f"block_{block_idx:04d}.vtu")
+                        writer = vtk.vtkXMLUnstructuredGridWriter()
+                        writer.SetFileName(temp_file)
+                        writer.SetInputData(clipped)
+                        writer.SetDataModeToAppended()
+                        writer.EncodeAppendedDataOff()
+                        writer.SetCompressorTypeToNone()  # Schneller ohne Kompression
+                        writer.Write()
+
+                        temp_files.append(temp_file)
+                        blocks_clipped += 1
+
+                        if self.verbose:
+                            # Warnung bei sehr langer Dauer
+                            if block_elapsed > 1800:  # > 30 Minuten
+                                hours = block_elapsed / 3600
+                                print(f"     ✓ {clipped.GetNumberOfCells():,} Zellen → Datei {blocks_clipped} ({hours:.1f}h) ⚠️  SEHR LANGSAM")
+                            else:
+                                print(f"     ✓ {clipped.GetNumberOfCells():,} Zellen → Datei {blocks_clipped} ({block_elapsed:.1f}s)")
+                    else:
+                        if self.verbose:
+                            print(f"     ⊘ Block außerhalb Box ({block_elapsed:.1f}s)")
+
+                except MemoryError as e:
+                    if self.verbose:
+                        print(f"     ❌ Speicherfehler: {e}")
+                        print(f"     Überspringe Block {block_idx+1}")
+                    continue
+
+                except Exception as e:
+                    if self.verbose:
+                        print(f"     ⚠️  Fehler: {type(e).__name__}: {e}")
+                    continue
+
+                finally:
+                    # Speicher freigeben
                     del clipper
                     if 'clipped' in locals():
                         del clipped
-                except:
-                    pass
-                gc.collect()
+                    gc.collect()
 
-        if blocks_clipped == 0:
+            # Phase 2: Lade temporäre Dateien und füge zusammen
+            if blocks_clipped == 0:
+                if self.verbose:
+                    print("\n⚠️  Keine Blöcke in Box!")
+                self.clipped_data = vtk.vtkUnstructuredGrid()
+                return self.clipped_data
+
             if self.verbose:
-                print("\n⚠️  Keine Blöcke in Box!")
-            self.clipped_data = vtk.vtkUnstructuredGrid()
+                print(f"\n🔧 Füge {blocks_clipped} Blöcke aus Dateien zusammen...")
+                print(f"   💾 Nutze Streaming-Merge (speicherschonend)")
+
+            append = vtk.vtkAppendFilter()
+
+            # Lade und füge Blöcke hinzu (werden beim Lesen nicht alle gleichzeitig im RAM gehalten)
+            for idx, temp_file in enumerate(temp_files):
+                reader = vtk.vtkXMLUnstructuredGridReader()
+                reader.SetFileName(temp_file)
+                reader.Update()
+                append.AddInputData(reader.GetOutput())
+
+                # Explizites Freigeben nach jedem Block
+                del reader
+
+                # Garbage Collection alle 5 Blöcke
+                if (idx + 1) % 5 == 0:
+                    gc.collect()
+                    if self.verbose:
+                        mem = psutil.Process().memory_info().rss / 1024 / 1024
+                        print(f"   📂 {idx + 1}/{blocks_clipped} Dateien geladen (💾 {mem:.0f} MB)")
+                elif self.verbose and (idx + 1) % 10 == 0:
+                    print(f"   📂 {idx + 1}/{blocks_clipped} Dateien geladen...")
+
+            if self.verbose:
+                print(f"   🔄 Führe finales Merge aus...")
+                mem_before = psutil.Process().memory_info().rss / 1024 / 1024
+
+            # Finale Garbage Collection vor dem Merge
+            gc.collect()
+
+            append.Update()
+            self.clipped_data = append.GetOutput()
+
+            # Cleanup nach Merge
+            del append
+            gc.collect()
+
+            if self.verbose:
+                mem_after = psutil.Process().memory_info().rss / 1024 / 1024
+                print(f"   ✓ Merge abgeschlossen (💾 {mem_before:.0f} → {mem_after:.0f} MB)")
+
+            elapsed = time.time() - start_time
+
+            if self.verbose:
+                n_cells = self.clipped_data.GetNumberOfCells()
+                n_points = self.clipped_data.GetNumberOfPoints()
+                print("\n" + "=" * 70)
+                print("✅ BLOCK-BY-BLOCK CLIPPING ERFOLGREICH (STREAMING)")
+                print("=" * 70)
+                blocks_processed = blocks_clipped + blocks_skipped
+                print(f"⏱️  Zeit: {elapsed:.1f}s ({elapsed/blocks_processed:.1f}s/Block)")
+                print(f"📊 Ergebnis: {n_points:,} Punkte, {n_cells:,} Zellen")
+                print(f"📦 {blocks_clipped}/{n_blocks} Blöcke geclippt, {blocks_skipped} übersprungen")
+
             return self.clipped_data
 
-        if self.verbose:
-            print(f"\n🔧 Füge {blocks_clipped} Blöcke zusammen...")
-
-        append.Update()
-        self.clipped_data = append.GetOutput()
-
-        elapsed = time.time() - start_time
-
-        if self.verbose:
-            n_cells = self.clipped_data.GetNumberOfCells()
-            n_points = self.clipped_data.GetNumberOfPoints()
-            print("\n" + "=" * 70)
-            print("✅ BLOCK-BY-BLOCK CLIPPING ERFOLGREICH")
-            print("=" * 70)
-            blocks_processed = blocks_clipped + blocks_skipped
-            print(f"⏱️  Zeit: {elapsed:.1f}s ({elapsed/blocks_processed:.1f}s/Block)")
-            print(f"📊 Ergebnis: {n_points:,} Punkte, {n_cells:,} Zellen")
-            print(f"📦 {blocks_clipped}/{n_blocks} Blöcke geclippt, {blocks_skipped} übersprungen")
-
-        return self.clipped_data
+        finally:
+            # Aufräumen: Lösche temporäre Dateien
+            if self.verbose and temp_files:
+                print(f"\n🧹 Räume {len(temp_files)} temporäre Dateien auf...")
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as e:
+                if self.verbose:
+                    print(f"   ⚠️  Warnung beim Löschen: {e}")
 
     def _bounds_intersect(self, bounds1, bounds2):
         """
