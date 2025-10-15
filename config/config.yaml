@@ -1,0 +1,46 @@
+# ParaView Clipping Konfiguration
+# ================================
+
+# Allgemeine Einstellungen
+num_processes: 4          # Anzahl CPU-Kerne (empfohlen: 2-8 für große Dateien)
+timeout: 36000            # Timeout in Sekunden (36000 = 10 Stunden)
+
+# Clipping-Konfigurationen (nur eine aktiv, Rest auskommentiert)
+# ================================================================
+
+# === FLIEGER KONFIGURATION ===
+active_config: flieger
+
+configs:
+  flieger:
+    input_file: "input/Flieger/Referenzmodell_AoA138_PP830_ensight.case"
+    output_dir: "output"
+    output_name: "Flieger_clipped_paraview"
+    clip_type: "box"
+    bounds: [-10.0, 5.0, -10.0, 10.0, -5.0, 5.0]  # [xmin, xmax, ymin, ymax, zmin, zmax]
+
+  # === KANAL KONFIGURATION ===
+  kanal:
+    input_file: "input/Kanalströmung/Kanalstroemung.encas"
+    output_dir: "output"
+    output_name: "Kanal_clipped_paraview"
+    clip_type: "box"
+    bounds: [-0.5, 0.5, -0.1, 0.1, 0.0, 1.0]
+
+  # === BEISPIEL: PLANE CLIPPING ===
+  # plane_example:
+  #   input_file: "input/data.case"
+  #   output_dir: "output"
+  #   output_name: "plane_clipped"
+  #   clip_type: "plane"
+  #   origin: [0.0, 0.0, 0.0]    # Punkt auf der Ebene
+  #   normal: [1.0, 0.0, 0.0]    # Normale der Ebene
+
+  # === BEISPIEL: SPHERE CLIPPING ===
+  # sphere_example:
+  #   input_file: "input/data.case"
+  #   output_dir: "output"
+  #   output_name: "sphere_clipped"
+  #   clip_type: "sphere"
+  #   center: [0.0, 0.0, 0.0]    # Zentrum der Kugel
+  #   radius: 5.0                # Radius
