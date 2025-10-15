@@ -1,0 +1,6 @@
+xmin:-10
+xmax:5
+ymin:-10
+ymax:10
+zmin:-5
+zmax:10

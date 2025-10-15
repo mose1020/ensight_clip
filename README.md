@@ -1,163 +1,109 @@
-# EnSight Clipper - Interactive 3D Clipping Tool
+# EnSight Box Clipper
 
-Interaktives Python-Tool zum Zuschneiden von EnSight-Dateien mit 3D-Vorschau.
-
-## Features
-
-- ✅ **Interaktive 3D-Visualisierung** mit VTK
-- ✅ **Echtzeit-Vorschau** des zugeschnittenen Bereichs
-- ✅ **3 Clip-Typen**: Ebene, Quader, Kugel
-- ✅ **Variable Visualisierung**: Einfärbung nach Druck, Geschwindigkeit, etc.
-- ✅ **Export**: Speichert .encas + .xml + alle Strömungsgrößen
+Ein einfaches Tool zum Ausschneiden von Boxen aus EnSight-Datensätzen mit ParaView.
 
 ## Installation
 
+### Voraussetzungen
+
+- ParaView (mit pvbatch)
+- Python 3.x
+- VTK Python-Bindings (normalerweise mit ParaView installiert)
+
+### Setup
+
 ```bash
-# Virtual Environment erstellen (falls noch nicht vorhanden)
-python3 -m venv .venv
+# Repository klonen
+git clone <repository-url>
+cd ensight_clip
 
-# Aktivieren
-source .venv/bin/activate
-
-# Abhängigkeiten installieren
-pip install -r requirements.txt
+# Skripte ausführbar machen
+chmod +x clip_box.py run_clip.sh
 ```
 
 ## Verwendung
 
-### GUI Version (Empfohlen)
+Das Tool verwendet den **globalen Ursprung (0,0,0)** als Referenzpunkt. Sie können die Box-Grenzen in positive (+) und negative (-) Richtung vom Ursprung aus definieren.
+
+### Einfache Verwendung
 
 ```bash
-source .venv/bin/activate
-python ensight_clip_gui.py
+# Standard 10m × 10m × 10m Box (±5m in alle Richtungen)
+./run_clip.sh
+
+# Oder direkt mit pvbatch
+pvbatch clip_box.py
 ```
 
-**GUI Bedienung:**
+### Box-Grenzen anpassen
 
-1. **Datei laden**:
-   - Klick auf "Load EnSight File" oder
-   - Die Kanalströmung wird automatisch geladen
-
-2. **Clip-Typ wählen**:
-   - **Plane**: Schnitt mit einer Ebene
-     - Origin: Position der Ebene im Raum
-     - Normal: Richtungsvektor der Ebene
-     - Preset-Buttons: X, Y, Z für Standard-Achsen
-     - Invert: Andere Seite behalten
-
-   - **Box**: Schnitt mit einem Quader
-     - X, Y, Z Min/Max: Begrenzungen des Quaders
-
-   - **Sphere**: Schnitt mit einer Kugel
-     - Center: Mittelpunkt der Kugel
-     - Radius: Kugelradius
-
-3. **Visualisierung**:
-   - "Show Original": Original-Geometrie als Wireframe
-   - "Show Clipped": Zugeschnittener Bereich (solid)
-   - "Color by Variable": Einfärbung nach Strömungsgröße
-
-4. **Speichern**:
-   - "Save Clipped Data" → Ausgabeverzeichnis wählen
-   - Basisname eingeben
-   - Alle Dateien werden gespeichert (.encas, .xml, .geo, .scl*, .vel)
-
-**Maus-Navigation:**
-- **Drehen**: Linke Maustaste + Ziehen
-- **Verschieben**: Mittlere Maustaste + Ziehen
-- **Zoom**: Mausrad oder Rechte Maustaste + Ziehen
-- **Reset View**: Button "Reset View"
-
-### CLI Version
+Sie können die Box-Grenzen mit den Argumenten `--xmin`, `--xmax`, `--ymin`, `--ymax`, `--zmin`, `--zmax` festlegen:
 
 ```bash
-source .venv/bin/activate
-python ensight_clip.py
+# Box von -2m bis +5m in X-Richtung
+./run_clip.sh --xmin -2 --xmax 5
+
+# Große Box: 20m × 20m × 10m
+./run_clip.sh --xmin -10 --xmax 10 --ymin -10 --ymax 10 --zmin -5 --zmax 5
+
+# Asymmetrische Box
+./run_clip.sh --xmin -3 --xmax 7 --ymin -2 --ymax 2 --zmin -1 --zmax 4
 ```
 
-Die CLI-Version nutzt vordefinierte Parameter aus dem Code (Zeilen 217-234).
+### Weitere Optionen
 
-## Projekt-Struktur
-
-```
-ensight_clip/
-├── input/
-│   └── Kanalströmung/
-│       ├── Kanalstroemung.encas    # Input Case-Datei
-│       ├── Kanalstroemung.geo      # Geometrie
-│       ├── Kanalstroemung.scl*     # Skalare Größen
-│       ├── Kanalstroemung.vel      # Geschwindigkeit
-│       └── Kanalstroemung.xml      # Metadata
-├── output/                          # Ausgabeverzeichnis
-│   └── Kanalstroemung_clipped/     # Unterordner für jeden Clip
-│       ├── Kanalstroemung_clipped.encas
-│       ├── Kanalstroemung_clipped.xml
-│       ├── Kanalstroemung_clipped.0.00000.geo
-│       └── Kanalstroemung_clipped.0.00000_n.*
-├── .venv/                          # Virtual Environment
-├── ensight_clip_gui.py             # GUI Version ⭐
-├── ensight_clip.py                 # CLI Version
-├── ensight_clip_gui.spec           # PyInstaller Konfiguration
-├── requirements.txt                # Python-Abhängigkeiten
-├── BUILD_WINDOWS_EXE.md            # Anleitung für Windows .exe
-└── README.md                       # Diese Datei
-```
-
-## Windows .exe erstellen
-
-Siehe [BUILD_WINDOWS_EXE.md](BUILD_WINDOWS_EXE.md) für eine detaillierte Anleitung zum Erstellen einer ausführbaren Windows .exe-Datei.
-
-## Abhängigkeiten
-
-- **numpy** ≥ 1.21.0 - Numerische Berechnungen
-- **vtk** ≥ 9.2.0 - 3D-Visualisierung und EnSight I/O
-- **PyQt5** ≥ 5.15.0 - GUI Framework
-- **pyinstaller** ≥ 6.0.0 - Executable Builder (optional)
-
-## Beispiel-Workflow
-
-1. GUI starten: `python ensight_clip_gui.py`
-2. Kanalströmung wird automatisch geladen
-3. Clip-Typ "Plane" wählen
-4. Normal auf Z-Achse setzen (Button "Z")
-5. Origin Z-Wert anpassen (z.B. 0.5 für Mitte)
-6. In 3D-View das Ergebnis begutachten
-7. Optional: "Color by Variable" → "velocity" wählen
-8. "Save Clipped Data" klicken
-9. Ausgabeverzeichnis wählen (z.B. `output/`)
-10. Basisname eingeben (z.B. `Kanalstroemung_clipped`)
-11. Die Dateien werden in einem Unterordner gespeichert: `output/Kanalstroemung_clipped/`
-
-## Tipps
-
-- **Plane Clipping**: Am besten für 2D-Schnitte durch das Modell
-- **Box Clipping**: Ideal zum Extrahieren eines rechteckigen Bereichs
-- **Sphere Clipping**: Gut für radiale Bereiche um einen Punkt
-
-- Die Vorschau zeigt:
-  - **Grau (Wireframe)**: Original-Geometrie
-  - **Rot (Solid)**: Zugeschnittener Bereich
-
-- Alle Strömungsgrößen (pressure, velocity, turbulence) werden automatisch mitgeschnitten
-
-## Troubleshooting
-
-**GUI startet nicht:**
 ```bash
-# PyQt5 neu installieren
-pip install --force-reinstall PyQt5
+# Hilfe anzeigen
+./run_clip.sh --help
+
+# Mit EnSight Gold Export
+./run_clip.sh --export-ensight
+
+# Andere Input-Datei verwenden
+./run_clip.sh -i input/other_dataset.case
 ```
 
-**"No display" Fehler:**
+## Ausgabe
+
+Die geclippten Daten werden im `output/` Verzeichnis gespeichert:
+- VTU-Format (immer)
+- EnSight Gold Format (optional mit `--export-ensight`)
+
+Dateiname: `box_[Breite]x[Höhe]x[Tiefe]m_[Zeitstempel]/`
+
+## Beispiele
+
+### Kleine Box um den Ursprung
 ```bash
-# X11 Display für WSL einrichten oder
-# Auf Windows/Mac GUI ausführen
+./run_clip.sh --xmin -1 --xmax 1 --ymin -1 --ymax 1 --zmin -1 --zmax 1
 ```
+Erstellt eine 2m × 2m × 2m Box.
 
-**Datei nicht gefunden:**
-- Sicherstellen, dass `input/Kanalströmung/Kanalstroemung.encas` existiert
-- Oder über "Load EnSight File" manuell laden
+### Box in positive X-Richtung
+```bash
+./run_clip.sh --xmin 0 --xmax 10
+```
+Box von 0 bis 10m in X, Standard (±5m) in Y und Z.
 
-## Autor
+### Box in negative X-Richtung
+```bash
+./run_clip.sh --xmin -10 --xmax 0
+```
+Box von -10 bis 0m in X, Standard (±5m) in Y und Z.
 
-Erstellt mit Claude Code
+## Dateien
+
+- `clip_box.py` - Hauptskript für das Box-Clipping
+- `run_clip.sh` - Bash-Wrapper für einfache Ausführung
+- `vtu_to_ensight_gold.py` - Optional: Konvertiert VTU zu EnSight Gold ASCII
+
+## Hinweise
+
+- Der Ursprung (0,0,0) ist der Referenzpunkt für alle Box-Definitionen
+- Negative Werte (-x) bedeuten Ausdehnung in negative Richtung vom Ursprung
+- Positive Werte (+x) bedeuten Ausdehnung in positive Richtung vom Ursprung
+- Die Box wird immer als Quader mit parallelen Kanten zu den Koordinatenachsen erstellt
+
+## Lizenz
+
+MIT
