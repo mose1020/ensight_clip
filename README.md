@@ -93,9 +93,64 @@ Box von -10 bis 0m in X, Standard (±5m) in Y und Z.
 
 ## Dateien
 
-- `clip_box.py` - Hauptskript für das Box-Clipping
+- `clip_box.py` - Hauptskript für das Box-Clipping (optimiert)
+- `clip_box_lowmem.py` - Low-Memory Version für sehr große Boxen
 - `run_clip.sh` - Bash-Wrapper für einfache Ausführung
-- `vtu_to_ensight_gold.py` - Optional: Konvertiert VTU zu EnSight Gold ASCII
+- `run_clip_background.sh` - Führt Clipping im Hintergrund aus
+- `check_clip_status.sh` - Prüft Status des Hintergrund-Prozesses
+- `stop_clip.sh` - Stoppt laufenden Hintergrund-Prozess
+
+## Speicher-Optimierung (WICHTIG für große Boxen!)
+
+Bei großen Boxen (>10m³) kann der Arbeitsspeicher überlaufen. Hier sind Lösungen:
+
+### Optimierte Version (Standard)
+Die Standard-Version `clip_box.py` wurde optimiert:
+- Kein `Tetrahedralize` mehr (spart ~30-50% RAM)
+- VTU-Export übersprungen (nur EnSight wird gespeichert)
+- Explizites Cleanup der Pipeline-Objekte
+
+```bash
+# Normale Verwendung mit Optimierungen
+pvbatch clip_box.py --xmin=-10 --xmax=5 --ymin=-10 --ymax=10 --zmin=-5 --zmax=5
+```
+
+### Low-Memory Version (für extreme Fälle)
+Für sehr große Boxen (15×20×10m oder größer):
+
+```bash
+# Verwendet clip_box_lowmem.py
+pvbatch clip_box_lowmem.py --xmin=-10 --xmax=5 --ymin=-10 --ymax=10 --zmin=-5 --zmax=5
+```
+
+**Unterschiede:**
+- `Crinkleclip=0` (exaktere aber weniger speicherintensive Clipping-Methode)
+- Sofortiges Löschen von Zwischenergebnissen
+- Python Garbage Collection nach jedem Schritt
+- NUR EnSight-Export (kein VTU)
+
+### WSL Memory Limit erhöhen
+
+Falls trotzdem nicht genug RAM:
+
+1. Erstelle/Editiere `%USERPROFILE%\.wslconfig` (auf Windows):
+```ini
+[wsl2]
+memory=96GB
+swap=32GB
+processors=16
+```
+
+2. WSL neustarten:
+```bash
+wsl --shutdown
+```
+
+### Weitere Tipps
+
+- **Monitoring**: Speicherverbrauch überwachen mit `htop` oder `free -h`
+- **Chunking**: Große Box in mehrere kleinere Boxen aufteilen
+- **Server-Version**: Auf Server mit mehr RAM ausführen
 
 ## Hinweise
 
